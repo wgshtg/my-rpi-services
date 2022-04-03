@@ -1,0 +1,91 @@
+version: '3'
+services:
+  nextcloud:
+    container_name: nextcloud
+    depends_on:
+      - postgresql
+    environment:
+      - TZ=${TIME_ZONE}
+    image: nextcloud
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.nextcloud.entrypoints=websecure
+      - traefik.http.routers.nextcloud.rule=Host(`${NEXTCLOUD_HOST}`)
+      - traefik.http.routers.nextcloud.tls=true
+      - traefik.http.routers.nextcloud.tls.certresolver=letsencrypt
+    restart: always
+    security_opt:
+      - seccomp:unconfined
+    volumes:
+      - ${NEXTCLOUD_VOLUME}:/var/www/html
+      - ${EXTERNAL_STORAGE}:/external_storage:rw
+
+  pihole:
+    container_name: pihole
+    dns:
+      - 127.0.0.1
+    environment:
+      - TZ=${TIME_ZONE}
+      - WEBPASSWORD=${PIHOLE_PASSWORD}
+    image: pihole/pihole:2022.02.1
+    ports:
+      - 53:53/tcp
+      - 53:53/udp
+      - 8888:80/tcp
+    restart: unless-stopped
+    volumes:
+      - ${PIHOLE_VOLUME}:/etc/pihole
+
+  postgresql:
+    container_name: postgresql
+    image: postgres:alpine
+    restart: always
+    security_opt:
+      - seccomp:unconfined
+    volumes:
+      - ${POSTGRESQL_VOLUME}:/var/lib/postgresql/data
+
+  traefik:
+    command:
+      - '--api.insecure=true'
+      - '--entrypoints.web.address=:80'
+      - '--entrypoints.websecure.address=:443'
+      - '--providers.docker=true'
+      - '--providers.docker.exposedbydefault=false'
+      - '--serverstransport.insecureskipverify=true'
+      - '--certificatesresolvers.letsencrypt.acme.httpchallenge=true'
+      - '--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web'
+      - '--certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_ACME_EMAIL}'
+      - '--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json'
+      - '--entrypoints.web.http.redirections.entryPoint.to=websecure'
+      - '--entrypoints.web.http.redirections.entryPoint.scheme=https'
+      - '--entrypoints.web.http.redirections.entrypoint.permanent=true'
+    container_name: traefik
+    image: traefik
+    ports:
+      - '80:80'
+      - '443:443'
+      - '8080:8080'
+    restart: unless-stopped
+    security_opt:
+      - seccomp:unconfined
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${LETSENCRYPT_VOLUME}:/letsencrypt
+
+  wakapi:
+    container_name: wakapi
+    environment:
+      - WAKAPI_PASSWORD_SALT=${WAKAPI_PASSWORD_SALT}
+      - WAKAPI_DB_AUTOMIGRATE_FAIL_SILENTLY=true
+    image: ghcr.io/muety/wakapi:latest
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.wakapi.entrypoints=websecure
+      - traefik.http.services.wakapi.loadbalancer.server.port=3000
+      - traefik.http.routers.wakapi.rule=Host(`${WAKAPI_HOST}`)
+      - traefik.http.routers.wakapi.tls=true
+      - traefik.http.routers.wakapi.tls.certresolver=letsencrypt
+    restart: always
+    volumes:
+      - ${WAKAPI_VOLUME}:/data
